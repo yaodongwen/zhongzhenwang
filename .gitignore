@@ -1,0 +1,5 @@
+__pycache__/
+data/
+data_backup_before_2016_retry
+data_backup_v31
+logs/
