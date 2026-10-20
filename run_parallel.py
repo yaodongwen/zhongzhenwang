@@ -10,6 +10,8 @@ import signal
 import subprocess
 import sys
 import threading
+import time
+from progress import snapshot, bar
 
 LOG=logging.getLogger('parallel')
 STOP=threading.Event()
@@ -67,9 +69,11 @@ def main():
     ap.add_argument('--limit-days',type=int,default=0,help='Maximum newly processed dates PER YEAR')
     ap.add_argument('--force-date',action='store_true',help='Rebuild complete days, use after parser fixes')
     ap.add_argument('--include-disclosure',action='store_true')
+    ap.add_argument('--progress-interval',type=float,default=20,help='Main terminal progress refresh seconds, 0 to disable')
     args=ap.parse_args()
     if args.workers<1 or args.workers>12:ap.error('workers must be between 1 and 12')
     if args.delay<0:ap.error('delay must be nonnegative')
+    if args.progress_interval<0:ap.error('progress-interval must be nonnegative')
     start=dt.date.fromisoformat(args.start);end=dt.date.fromisoformat(args.end)
     if start>end:ap.error('start must precede end')
     years=list(range(start.year,end.year+1))
@@ -79,6 +83,17 @@ def main():
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             futures=[pool.submit(run_year,y,args) for y in years]
+            while True:
+                if all(f.done() for f in futures):break
+                if STOP.is_set():break
+                if args.progress_interval:
+                    snap,total=snapshot(args.data_dir,args.start,args.end)
+                    attempted=sum(v['attempted'] for v in snap.values())
+                    complete=sum(v['complete'] for v in snap.values())
+                    articles=sum(v['articles'] for v in snap.values())
+                    LOG.info('PROGRESS processed [%s] %s/%s | complete %s | saved articles %s',
+                             bar(attempted,total,18),attempted,total,complete,articles)
+                time.sleep(max(args.progress_interval,1) if args.progress_interval else 1)
             outcomes=[f.result() for f in futures]
     except KeyboardInterrupt:
         signal_stop(signal.SIGINT,None)
